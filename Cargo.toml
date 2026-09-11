@@ -1,0 +1,60 @@
+[package]
+name = "zomboid_map"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+path = "src/bin/single_tile.rs"
+name = "single-tile"
+
+[[bin]]
+path = "src/bin/random_tiles.rs"
+name = "random-tiles"
+
+[[bin]]
+path = "src/bin/stitched_tiles.rs"
+name = "stitched-tiles"
+
+[[bench]]
+name = "color_sums"
+harness = false
+
+[dependencies]
+tokio = { version = "1", features = ["full", "tracing"] }
+bytes = "1"
+image = { version = "0.25", features = ["png", "rayon"] }
+imageproc = { version = "0.27", features = [] }
+phf = { version = "0.14", features = ["macros"] }
+dashmap = { version = "6", features = ["inline"] }
+rand = { version = "0.10" }
+thiserror = "2"
+futures = { version = "0.3" }
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+console-subscriber = { version = "0.5" }
+heapless = "0.9"
+ndarray = "0.17"
+nalgebra = "0.35"
+wide = "1.7"
+fnv = "1"
+clap = { version = "4", features = ["derive"] }
+frozen-collections = { version = "0.9" }
+
+[dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports", "async_tokio", "async"] }
+
+[build-dependencies]
+image = "0.25"
+wide = "1.7"
+phf = "0.14"
+frozen-collections = "0.9"
+syn = { version = "3.0.5", features = ["printing", "parsing", "clone-impls", "derive", "extra-traits"], default-features = false }
+itertools = "0.15.0"
+
+[profile.release]
+opt-level = 3
+debug = false
+debug-assertions = false
+lto = "fat"
+rpath = false
+codegen-units = 1
