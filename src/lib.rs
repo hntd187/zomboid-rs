@@ -17,6 +17,8 @@ pub mod cell;
 pub mod foliage;
 pub mod handout;
 pub mod header;
+pub mod iso_render;
+pub mod pack;
 pub mod rooms;
 pub mod textures;
 pub mod top_render;
