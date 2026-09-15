@@ -1,15 +1,15 @@
 // #![allow(unused)]
 
+use crate::handout::ImageCell;
 use bytes::Bytes;
+use image::{ImageBuffer, Rgba};
 use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
-use image::{ImageBuffer, Rgba};
 use thiserror::Error;
-use crate::handout::ImageCell;
+use tracing::dispatcher::SetGlobalDefaultError;
 
-static TEXTURE_PATH: LazyLock<PathBuf> =
-    LazyLock::new(|| PathBuf::from("D:\\pzmap\\texture\\default"));
+static TEXTURE_PATH: LazyLock<PathBuf> = LazyLock::new(|| PathBuf::from("D:\\pzmap\\texture\\default"));
 const CELL_SIZE_IN_BLOCKS: usize = 32;
 const BLOCK_SIZE_IN_SQUARES: usize = 8;
 
@@ -17,9 +17,9 @@ pub mod cell;
 pub mod foliage;
 pub mod handout;
 pub mod header;
+pub mod rooms;
 pub mod textures;
 pub mod top_render;
-pub mod rooms;
 
 pub type ImageRef = Arc<ImageCell<Rgba<u8>, ImageBuffer<Rgba<u8>, Vec<u8>>>>;
 
@@ -35,6 +35,8 @@ pub enum ZError {
     Image(#[from] image::ImageError),
     #[error("Infallible")]
     Infallible(#[from] Infallible),
+    #[error("Global Default Error: {0}")]
+    GlobalDefault(#[from] SetGlobalDefaultError),
 }
 
 pub type ZResult<T> = Result<T, ZError>;
@@ -60,7 +62,7 @@ pub struct Building {
 
 #[derive(Default, Debug, Clone)]
 pub struct Room {
-    id: u32,
+    id: usize,
     name: String,
     layer: i32,
     area: i32,
@@ -80,7 +82,7 @@ pub struct Rect(i32, i32, i32, i32);
 
 #[cfg(test)]
 mod tests {
-    use crate::header::load_lotheader;
+    use crate::header::LotHeaderReader;
     use std::collections::HashMap;
     use std::error::Error;
     use std::path::PathBuf;
@@ -90,7 +92,8 @@ mod tests {
     pub async fn test_read() -> Result<(), Box<dyn Error>> {
         let path = PathBuf::from("D:\\SteamLibrary\\steamapps\\common\\ProjectZomboid\\media\\maps\\Muldraugh, KY\\49_6.lotheader");
         let start = Instant::now();
-        let header = load_lotheader(&path).await?;
+        let mut lot_reader = LotHeaderReader::new();
+        let header = lot_reader.load_lotheader(&path).await?;
         println!("Time taken: {:?}", start.elapsed());
         println!("header: {}", header.version);
         println!("dimension: {}x{}", header.width, header.height);

@@ -23,22 +23,20 @@ harness = false
 tokio = { version = "1", features = ["full", "tracing"] }
 bytes = "1"
 image = { version = "0.25", features = ["png", "rayon"] }
-imageproc = { version = "0.27", features = [] }
+imageproc = { version = "0.27" }
 phf = { version = "0.14", features = ["macros"] }
 dashmap = { version = "6", features = ["inline"] }
 rand = { version = "0.10" }
 thiserror = "2"
 futures = { version = "0.3" }
+memchr = "2"
 tracing = { version = "0.1" }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-console-subscriber = { version = "0.5" }
 heapless = "0.9"
 ndarray = "0.17"
 nalgebra = "0.35"
 wide = "1.7"
 fnv = "1"
 clap = { version = "4", features = ["derive"] }
-frozen-collections = { version = "0.9" }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports", "async_tokio", "async"] }
@@ -47,9 +45,6 @@ criterion = { version = "0.8", features = ["html_reports", "async_tokio", "async
 image = "0.25"
 wide = "1.7"
 phf = "0.14"
-frozen-collections = "0.9"
-syn = { version = "3.0.5", features = ["printing", "parsing", "clone-impls", "derive", "extra-traits"], default-features = false }
-itertools = "0.15.0"
 
 [profile.release]
 opt-level = 3

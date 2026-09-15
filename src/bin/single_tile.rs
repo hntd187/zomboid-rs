@@ -1,9 +1,9 @@
 use clap::Parser;
 use std::path::PathBuf;
 use std::sync::Arc;
+use zomboid_map::ZResult;
 use zomboid_map::handout::*;
 use zomboid_map::top_render::{read_lots, render_top};
-use zomboid_map::ZResult;
 
 #[derive(Parser, Debug)]
 pub struct Args {

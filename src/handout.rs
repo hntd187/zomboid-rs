@@ -75,11 +75,7 @@ where
 
 macro_rules! impl_from_with_format {
     ($px_type:ident, $channel_type:ty, $to_fn:ident) => {
-        impl<Container> FromWithFormat<Container>
-            for Img<
-                $px_type<$channel_type>,
-                ImageBuffer<$px_type<$channel_type>, Vec<$channel_type>>,
-            >
+        impl<Container> FromWithFormat<Container> for Img<$px_type<$channel_type>, ImageBuffer<$px_type<$channel_type>, Vec<$channel_type>>>
         where
             Container: Deref<Target = [u8]>,
         {
