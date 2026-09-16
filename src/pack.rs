@@ -1,10 +1,7 @@
-use crate::foliage::FOLIAGE_MAP;
-use crate::iso_render::load_sprite;
-use crate::{TEXTURE_PATH, ZResult};
+use crate::ZResult;
 use dashmap::DashMap;
 use dashmap::mapref::one::Ref;
 use image::{RgbaImage, imageops};
-use imageproc::compose::overlay;
 use std::io::{Error, ErrorKind};
 use std::path::Path;
 
@@ -38,15 +35,8 @@ impl<'a> Reader<'a> {
     /// u32 length prefix followed by that many bytes.
     fn bytes_with_len(&mut self) -> ZResult<&'a [u8]> {
         let n = self.u32()? as usize;
-        let b = &self.data[self.pos - 4..(self.pos - 4) + n];
+        let b = &self.data[self.pos..self.pos + n];
         self.pos += n;
-        Ok(b)
-    }
-
-    fn bytes_for_len(&mut self, len: usize) -> ZResult<&'a [u8]> {
-        let v = self.u32()? as usize;
-        let b = &self.data[len + 4..(len + 4) + v];
-        self.pos += v;
         Ok(b)
     }
 
@@ -152,7 +142,7 @@ impl TextureLibrary {
 
             // Page PNG: v1 is length-prefixed; v0 runs until the 0xDEADBEEF magic.
             let png = match version {
-                1 => r.bytes_for_len(r.pos)?,
+                1 => r.bytes_with_len()?,
                 0 => r.until(&[0xEF, 0xBE, 0xAD, 0xDE])?,
                 v => return Err(Error::new(ErrorKind::InvalidData, format!("unsupported pack version {v}")).into()),
             };
@@ -176,12 +166,33 @@ impl TextureLibrary {
     }
 }
 
-pub fn blend_sprite(texture_name: &str) -> Sprite {
-    let t = FOLIAGE_MAP[texture_name].into_iter().map(|s| load_sprite(*s).unwrap()).collect::<Vec<_>>();
-    let blended_image = t.iter().fold(RgbaImage::new(t[0].width(), t[0].height()), |mut i, b| overlay(&mut i, b, 0, 0));
-    let ox = -(blended_image.width() as i32 / 2);
-    let oy = -(blended_image.height() as i32);
-    Sprite { im: blended_image, ox, oy }
+/// Composite a multi-cell sprite (e.g. a tree) from named sub-sprites in the
+/// library, using each sub-sprite's own offset. Mirrors pzmap2dzi's
+/// `blend_textures`: size a canvas to the combined affected area, draw each
+/// cell at anchor + its offset, then anchor the result at bottom-center.
+pub fn blend_sprite(lib: &TextureLibrary, names: &[&str]) -> Option<Sprite> {
+    let subs: Vec<Sprite> = names.iter().filter_map(|n| lib.get(n).map(|v| v.value().clone())).collect();
+    if subs.is_empty() {
+        return None;
+    }
+
+    // Extent from the bottom-center in each direction (get_affected_area).
+    let (mut l, mut u, mut r, mut b) = (0i32, 0i32, 0i32, 0i32);
+    for s in &subs {
+        let (w, h) = (s.im.width() as i32, s.im.height() as i32);
+        l = l.max((-s.ox).max(0));
+        u = u.max((-s.oy).max(0));
+        r = r.max((s.ox + w).max(0));
+        b = b.max((s.oy + h).max(0));
+    }
+
+    let w = (2 * l.max(r)).max(1);
+    let (ax, ay) = (w / 2, u); // bottom-center anchor inside the canvas
+    let mut canvas = RgbaImage::new(w as u32, (u + b).max(1) as u32);
+    for s in &subs {
+        imageops::overlay(&mut canvas, &s.im, (ax + s.ox) as i64, (ay + s.oy) as i64);
+    }
+    Some(Sprite { im: canvas, ox: -ax, oy: -ay })
 }
 
 #[cfg(test)]
