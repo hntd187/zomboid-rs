@@ -2,7 +2,7 @@ use criterion::*;
 use std::path::PathBuf;
 use tokio::runtime::{Builder, Runtime};
 use zomboid_map::cell::LotPackReader;
-use zomboid_map::header::{LotHeaderReader};
+use zomboid_map::header::LotHeaderReader;
 
 fn criterion_benchmark(c: &mut Criterion) {
     let path = PathBuf::from("D:\\SteamLibrary\\steamapps\\common\\ProjectZomboid\\media\\maps\\Muldraugh, KY\\world_21_48.lotpack");
@@ -26,10 +26,6 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let mut group2 = c.benchmark_group("Lot Header");
     // group2.significance_level(0.1).sample_size(500).measurement_time(Duration::from_secs(180));
-    group2.bench_with_input(BenchmarkId::new("lotheader", "old"), &(header_path), |b, i| {
-        b.to_async(Runtime::new().unwrap()).iter(|| load_lotheader(&header_path));
-    });
-
     group2.bench_with_input(BenchmarkId::new("lotheader", "new"), &(&reader, &header_path), |b, i| {
         b.to_async(Runtime::new().unwrap()).iter(|| async {
             let mut r = i.0.clone();

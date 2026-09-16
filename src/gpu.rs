@@ -1,26 +1,8 @@
-//! Minimal `wgpu` backend: uploads a `CellColors` buffer as a texture and draws
-//! it with a single fullscreen triangle. This exact file runs on native
-//! (Vulkan/Metal/DX12) and on the web (WebGPU, or WebGL2 with the `webgl`
-//! feature) — that is the whole point of going through wgpu.
-//!
-//! SKETCH ONLY. wgpu/winit APIs move between releases; expect to nudge a few
-//! signatures (notably `request_device`, surface config, `Instance::new`) to
-//! match whichever versions you pin. Overlays (Lyon/Vello) are not drawn yet —
-//! see the note at the bottom for where they go.
-//!
-//! Suggested Cargo additions:
-//!   wgpu = "24"
-//!   winit = "0.30"
-//!   bytemuck = "1"
-//!   pollster = "0.4"          # native: block_on the async init
-//!   raw-window-handle = "0.6"
-//!   # web target also wants: wasm-bindgen, web-sys, console_error_panic_hook,
-//!   # wgpu with features = ["webgl"] as a fallback
-
-use std::sync::Arc;
-
-use crate::render_backend::{Backend, CellColors, Polygon};
 use crate::ZResult;
+use crate::render_backend::{Backend, CellColors, Polygon};
+use std::sync::Arc;
+use wgpu::CurrentSurfaceTexture;
+use winit::raw_window_handle;
 
 const SHADER: &str = r#"
 @group(0) @binding(0) var tile_tex: texture_2d<f32>;
@@ -72,16 +54,15 @@ impl WgpuBackend {
     where
         W: raw_window_handle::HasWindowHandle + raw_window_handle::HasDisplayHandle + Send + Sync + 'static,
     {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-        let surface = instance
-            .create_surface(window)
-            .expect("create surface");
+        let instance = wgpu::Instance::default();
+        let surface = instance.create_surface(window).expect("create surface");
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
+                apply_limit_buckets: false,
             })
             .await
             .expect("no adapter");
@@ -100,16 +81,12 @@ impl WgpuBackend {
 
         let caps = surface.get_capabilities(&adapter);
         // Prefer an sRGB format so the averaged colors display correctly.
-        let format = caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| f.is_srgb())
-            .unwrap_or(caps.formats[0]);
+        let format = caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(caps.formats[0]);
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
+            color_space: Default::default(),
             width: surface_w,
             height: surface_h,
             present_mode: wgpu::PresentMode::Fifo, // vsync; universally supported
@@ -148,8 +125,9 @@ impl WgpuBackend {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("tile-pl"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bind_group_layout)],
+
+            immediate_size: 0,
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -174,8 +152,8 @@ impl WgpuBackend {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
             cache: None,
+            multiview_mask: None,
         });
 
         // Nearest keeps map squares crisp when zoomed in; swap to Linear to blur.
@@ -214,7 +192,11 @@ impl WgpuBackend {
         }
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("tile-colors"),
-            size: wgpu::Extent3d { width: colors.width, height: colors.height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: colors.width,
+                height: colors.height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -227,8 +209,14 @@ impl WgpuBackend {
             label: Some("tile-bg"),
             layout: &self.bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
             ],
         });
         self.tile_texture = Some((texture, bind_group, size));
@@ -254,10 +242,19 @@ impl Backend for WgpuBackend {
                 bytes_per_row: Some(4 * colors.width),
                 rows_per_image: Some(colors.height),
             },
-            wgpu::Extent3d { width: colors.width, height: colors.height, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: colors.width,
+                height: colors.height,
+                depth_or_array_layers: 1,
+            },
         );
 
-        let frame = self.surface.get_current_texture().expect("surface frame");
+        let frame = match self.surface.get_current_texture() {
+            CurrentSurfaceTexture::Success(s) => s,
+            CurrentSurfaceTexture::Suboptimal(s) => s,
+            _ => return Ok(()),
+        };
+
         let view = frame.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
         {
@@ -265,6 +262,7 @@ impl Backend for WgpuBackend {
                 label: Some("tile-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
+                    depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -274,6 +272,7 @@ impl Backend for WgpuBackend {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, bind_group, &[]);
@@ -284,7 +283,7 @@ impl Backend for WgpuBackend {
             // `draw_indexed` in this same pass. (Or hand them to Vello.)
         }
         self.queue.submit([encoder.finish()]);
-        frame.present();
+        self.queue.present(frame);
         Ok(())
     }
 }

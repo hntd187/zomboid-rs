@@ -23,7 +23,11 @@ pub struct CellColors {
 
 impl CellColors {
     pub fn new(width: u32, height: u32) -> Self {
-        Self { width, height, pixels: vec![[0, 0, 0, 0]; (width * height) as usize] }
+        Self {
+            width,
+            height,
+            pixels: vec![[0, 0, 0, 0]; (width * height) as usize],
+        }
     }
 
     #[inline]
@@ -61,8 +65,7 @@ pub struct ImageBackend {
 
 impl Backend for ImageBackend {
     fn present(&mut self, colors: &CellColors, _overlays: &[Polygon]) -> ZResult<()> {
-        let buf = image::RgbaImage::from_raw(colors.width, colors.height, colors.as_bytes().to_vec())
-            .expect("buffer size matches width*height*4");
+        let buf = image::RgbaImage::from_raw(colors.width, colors.height, colors.as_bytes().to_vec()).expect("buffer size matches width*height*4");
         buf.save(&self.path)?;
         Ok(())
     }

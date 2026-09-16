@@ -21,10 +21,10 @@ async fn main() -> ZResult<()> {
             let ic = Arc::clone(&ic);
             let path = path.clone();
             let fut = async move {
-                let pack = read_lots(path.clone(), x, y).await?;
+                let pack = read_lots(path, x, y).await?;
                 let x_offset = x * 256;
                 let y_offset = (y - 19) * 256;
-                render_top(ic, pack, x_offset, y_offset, 0)
+                tokio::task::spawn_blocking(move || render_top(ic, pack, x_offset, y_offset, 0)).await.unwrap()
             };
             tasks.push(tokio::task::spawn(fut));
         }

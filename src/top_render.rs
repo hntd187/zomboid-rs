@@ -3,6 +3,7 @@ use crate::header::LotHeaderReader;
 use crate::textures::PRECOMPUTED_COLORS;
 use crate::{ImageRef, TEXTURE_PATH, ZError, ZResult};
 
+use crate::render_backend::CellColors;
 use dashmap::DashMap;
 use fnv::FnvBuildHasher;
 use image::Rgba;
@@ -36,20 +37,15 @@ fn read_tile(tile: &str) -> Option<f32x4> {
 
 #[inline]
 fn sum_colors(pallet: &[f32x4], pack: &LotPack, bx: usize, by: usize, layer: i32) -> Option<Rgba<u8>> {
-    let tiles_ids = pack.get_block(bx, by, layer)?;
+    let tiles_ids = pack.get_block(bx, by, layer);
     let mut final_color = f32x4::ZERO;
 
     for &tile_id in tiles_ids {
         final_color += pallet[tile_id as usize];
     }
 
-    let final_color = final_color.to_array();
-    Some(Rgba([
-        ((final_color[0] / final_color[3]) * 255.0) as u8,
-        ((final_color[1] / final_color[3]) * 255.0) as u8,
-        ((final_color[2] / final_color[3]) * 255.0) as u8,
-        255,
-    ]))
+    let scaled = ((final_color / f32x4::splat(final_color.to_array()[3])) * f32x4::splat(255.0)).to_array();
+    Some(Rgba([scaled[0] as u8, scaled[1] as u8, scaled[2] as u8, 255]))
 }
 
 pub async fn read_lots(path_buf: PathBuf, x: usize, y: usize) -> ZResult<LotPack> {
@@ -59,6 +55,24 @@ pub async fn read_lots(path_buf: PathBuf, x: usize, y: usize) -> ZResult<LotPack
     let mut pak_reader = LotPackReader::new();
     let lot_header = lot_reader.load_lotheader(&header).await?;
     pak_reader.load_lotpack(&pack, lot_header).await
+}
+
+pub fn render_cell(img: &mut CellColors, pack: LotPack, x_offset: usize, y_offset: usize, layer: i32) -> ZResult<()> {
+    let pallet: Vec<_> = pack
+        .header
+        .tiles
+        .iter()
+        .map(|tile| PRECOMPUTED_COLORS.get(tile.as_str()).copied().or_else(|| read_tile(&tile)).unwrap_or(f32x4::ZERO))
+        .collect();
+
+    for bx in 0..256 {
+        for by in 0..256 {
+            if let Some(color) = sum_colors(&pallet, &pack, bx, by, layer) {
+                img.put(bx as u32, by as u32, color.0)
+            }
+        }
+    }
+    Ok::<_, ZError>(())
 }
 
 pub fn render_top(img: ImageRef, pack: LotPack, x_offset: usize, y_offset: usize, layer: i32) -> ZResult<()> {

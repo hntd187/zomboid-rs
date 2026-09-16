@@ -15,10 +15,12 @@ const BLOCK_SIZE_IN_SQUARES: usize = 8;
 
 pub mod cell;
 pub mod foliage;
+pub mod gpu;
 pub mod handout;
 pub mod header;
 pub mod iso_render;
 pub mod pack;
+pub mod render_backend;
 pub mod rooms;
 pub mod textures;
 pub mod top_render;

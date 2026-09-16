@@ -1,25 +1,14 @@
-//! Parser for Project Zomboid's packed texture format (`.pack`, magic `PZPK`),
-//! ported from pzmap2dzi's `texture.py`.
-//!
-//! A pack holds "pages" (sprite-atlas PNGs); each page lists textures with a
-//! sub-rect into the atlas and a render offset. The offset is what places walls
-//! and fixtures correctly — it is expressed relative to the *bottom-center of
-//! the tile's square*, matching pzmap2dzi:
-//!   ox -= ow / 2   (center horizontally)
-//!   oy -= oh       (lift by the sprite's full original height)
-//!
-//! SKETCH: not verified by `cargo check` here (no network to fetch deps), but
-//! follows the Python byte-for-byte.
-
-use std::collections::HashMap;
+use crate::foliage::FOLIAGE_MAP;
+use crate::iso_render::load_sprite;
+use crate::{TEXTURE_PATH, ZResult};
+use dashmap::DashMap;
+use dashmap::mapref::one::Ref;
+use image::{RgbaImage, imageops};
+use imageproc::compose::overlay;
 use std::io::{Error, ErrorKind};
 use std::path::Path;
 
-use image::{imageops, RgbaImage};
-
-use crate::ZResult;
-
-/// A single tile sprite plus its offset from the square's bottom-center.
+#[derive(Debug, Clone)]
 pub struct Sprite {
     pub im: RgbaImage,
     pub ox: i32,
@@ -34,7 +23,8 @@ struct Reader<'a> {
 
 impl<'a> Reader<'a> {
     fn u32(&mut self) -> ZResult<u32> {
-        let v = u32::from_le_bytes(self.data[self.pos..self.pos + 4].try_into()?);
+        let data: [u8; 4] = self.data[self.pos..self.pos + 4].try_into()?;
+        let v = u32::from_le_bytes(data);
         self.pos += 4;
         Ok(v)
     }
@@ -48,8 +38,15 @@ impl<'a> Reader<'a> {
     /// u32 length prefix followed by that many bytes.
     fn bytes_with_len(&mut self) -> ZResult<&'a [u8]> {
         let n = self.u32()? as usize;
-        let b = &self.data[self.pos..self.pos + n];
+        let b = &self.data[self.pos - 4..(self.pos - 4) + n];
         self.pos += n;
+        Ok(b)
+    }
+
+    fn bytes_for_len(&mut self, len: usize) -> ZResult<&'a [u8]> {
+        let v = self.u32()? as usize;
+        let b = &self.data[len + 4..(len + 4) + v];
+        self.pos += v;
         Ok(b)
     }
 
@@ -82,7 +79,7 @@ struct TexMeta {
 /// Name -> sprite. Load one or more `.pack` files into it.
 #[derive(Default)]
 pub struct TextureLibrary {
-    sprites: HashMap<String, Sprite>,
+    sprites: DashMap<String, Sprite>,
 }
 
 impl TextureLibrary {
@@ -90,8 +87,12 @@ impl TextureLibrary {
         Self::default()
     }
 
-    pub fn get(&self, name: &str) -> Option<&Sprite> {
+    pub fn get(&self, name: &str) -> Option<Ref<'_, String, Sprite>> {
         self.sprites.get(name)
+    }
+
+    pub fn insert(&self, name: &str, sprite: Sprite) {
+        self.sprites.insert(name.to_string(), sprite);
     }
 
     pub fn len(&self) -> usize {
@@ -110,21 +111,24 @@ impl TextureLibrary {
                 self.load_pack(&path)?;
             }
         }
+        println!("Loaded {} sprites", self.sprites.len());
         Ok(())
     }
 
     pub fn load_pack(&mut self, path: &Path) -> ZResult<()> {
         let data = std::fs::read(path)?;
         let mut r = Reader { data: &data, pos: 0 };
+        let version = if data[0..4] != [b'P', b'Z', b'P', b'K'] {
+            0
+        } else {
+            r.pos += 4;
+            let v = r.u32()?;
+            v
+        };
 
-        if &data[0..4] != b"PZPK" {
-            return Err(Error::new(ErrorKind::InvalidData, "not a PZPK pack").into());
-        }
-        r.pos = 4;
-        let version = r.u32()?;
         let page_num = r.u32()?;
 
-        for _ in 0..page_num {
+        for i in 0..page_num {
             let _page_name = r.bytes_with_len()?;
             let count = r.u32()?;
             let _has_alpha = r.u32()?;
@@ -144,25 +148,21 @@ impl TextureLibrary {
                     oh: r.i32()?,
                 });
             }
+            // println!("Pushed {count} texture metas");
 
             // Page PNG: v1 is length-prefixed; v0 runs until the 0xDEADBEEF magic.
             let png = match version {
-                1 => r.bytes_with_len()?,
+                1 => r.bytes_for_len(r.pos)?,
                 0 => r.until(&[0xEF, 0xBE, 0xAD, 0xDE])?,
-                v => {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        format!("unsupported pack version {v}"),
-                    )
-                    .into())
-                }
+                v => return Err(Error::new(ErrorKind::InvalidData, format!("unsupported pack version {v}")).into()),
             };
-
+            // println!("loading png with len: {:?}", png.len());
             let page = image::load_from_memory(png)?.to_rgba8();
+            // println!("Image loaded.");
+            // println!("Loading {} texture sprites", metas.len());
             for m in metas {
                 // Crop the (trimmed) sprite rect out of the atlas page.
-                let im = imageops::crop_imm(&page, m.x as u32, m.y as u32, m.w as u32, m.h as u32)
-                    .to_image();
+                let im = imageops::crop_imm(&page, m.x as u32, m.y as u32, m.w as u32, m.h as u32).to_image();
                 // Offset relative to the square's bottom-center (pzmap2dzi math).
                 let sprite = Sprite {
                     im,
@@ -173,5 +173,35 @@ impl TextureLibrary {
             }
         }
         Ok(())
+    }
+}
+
+pub fn blend_sprite(texture_name: &str) -> Sprite {
+    let t = FOLIAGE_MAP[texture_name].into_iter().map(|s| load_sprite(*s).unwrap()).collect::<Vec<_>>();
+    let blended_image = t.iter().fold(RgbaImage::new(t[0].width(), t[0].height()), |mut i, b| overlay(&mut i, b, 0, 0));
+    let ox = -(blended_image.width() as i32 / 2);
+    let oy = -(blended_image.height() as i32);
+    Sprite { im: blended_image, ox, oy }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::TEXTURE_PATH;
+    use crate::foliage::FOLIAGE_MAP;
+    use crate::iso_render::load_sprite;
+    use imageproc::compose::overlay;
+    use imageproc::drawing::Canvas;
+
+    #[test]
+    pub fn test_blending() {
+        for (name, textures) in &FOLIAGE_MAP {
+            let t = textures.into_iter().map(|s| load_sprite(*s).unwrap()).collect::<Vec<_>>();
+            let blend_img = t.iter().fold(RgbaImage::new(t[0].width(), t[0].height()), |mut i, b| overlay(&mut i, b, 0, 0));
+            let tex_name = format!("{name}.png");
+
+            blend_img.save(TEXTURE_PATH.join(&tex_name)).unwrap();
+            println!("blended {}", tex_name);
+        }
     }
 }

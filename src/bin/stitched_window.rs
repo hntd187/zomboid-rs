@@ -22,17 +22,13 @@ use winit::window::{Window, WindowId};
 
 use zomboid_map::gpu::WgpuBackend;
 use zomboid_map::render_backend::{Backend, CellColors};
-use zomboid_map::top_render::{read_lots, render_top};
+use zomboid_map::top_render::{read_lots, render_cell, render_top};
 use zomboid_map::{ZError, ZResult};
 
 const CELLS: u32 = 256; // squares per pack edge
 const X_RANGE: std::ops::Range<usize> = 0..24;
 const Y_RANGE: std::ops::Range<usize> = 19..43;
 
-/// Build the full stitched canvas: read every pack concurrently (I/O on the
-/// async runtime), render each on the blocking pool (CPU, no awaits), then
-/// stitch the finished tiles into one canvas. This is the item-#1 fix from the
-/// perf review — reads overlap, CPU work stays off the async workers.
 async fn build_canvas(path: PathBuf) -> ZResult<CellColors> {
     let (nx, ny) = (X_RANGE.len() as u32, Y_RANGE.len() as u32);
     let mut canvas = CellColors::new(CELLS * nx, CELLS * ny);
@@ -43,11 +39,10 @@ async fn build_canvas(path: PathBuf) -> ZResult<CellColors> {
             let path = path.clone();
             tasks.push(tokio::spawn(async move {
                 let pack = read_lots(path, x, y).await?;
-                // Each pack renders into its own 256x256 buffer so the parallel
-                // work never aliases — no unsafe, no shared canvas.
+
                 let tile = tokio::task::spawn_blocking(move || {
                     let mut tile = CellColors::new(CELLS, CELLS);
-                    render_top(&mut tile, pack, 0, 0, 0);
+                    render_cell(&mut tile, pack, 0, 0, 0).expect("TODO: panic message");
                     tile
                 })
                 .await
@@ -65,8 +60,7 @@ async fn build_canvas(path: PathBuf) -> ZResult<CellColors> {
         for ty in 0..CELLS {
             let dst_row = ((y_off + ty) * canvas.width + x_off) as usize;
             let src_row = (ty * CELLS) as usize;
-            canvas.pixels[dst_row..dst_row + CELLS as usize]
-                .copy_from_slice(&tile.pixels[src_row..src_row + CELLS as usize]);
+            canvas.pixels[dst_row..dst_row + CELLS as usize].copy_from_slice(&tile.pixels[src_row..src_row + CELLS as usize]);
         }
     }
     Ok(canvas)
@@ -89,21 +83,14 @@ impl ApplicationHandler for App {
         let size = window.inner_size();
 
         // Native init is blocking; on web this would be `spawn_local(async { .. })`.
-        let backend = pollster::block_on(WgpuBackend::new(
-            window.clone(),
-            size.width.max(1),
-            size.height.max(1),
-        ))
-        .expect("wgpu init");
+        let backend = pollster::block_on(WgpuBackend::new(window.clone(), size.width.max(1), size.height.max(1))).expect("wgpu init");
 
         self.backend = Some(backend);
         self.window = Some(window);
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        let (Some(backend), Some(window), Some(colors)) =
-            (self.backend.as_mut(), self.window.as_ref(), self.colors.as_ref())
-        else {
+        let (Some(backend), Some(window), Some(colors)) = (self.backend.as_mut(), self.window.as_ref(), self.colors.as_ref()) else {
             return;
         };
         match event {
@@ -133,7 +120,10 @@ fn main() -> ZResult<()> {
     println!("canvas built: {}x{}", colors.width, colors.height);
 
     // 2. Display it. `Wait` keeps the loop idle until an event (no busy redraw).
-    let mut app = App { colors: Some(Arc::new(colors)), ..Default::default() };
+    let mut app = App {
+        colors: Some(Arc::new(colors)),
+        ..Default::default()
+    };
     let event_loop = EventLoop::new().expect("event loop");
     event_loop.set_control_flow(ControlFlow::Wait);
     event_loop.run_app(&mut app).expect("run_app");

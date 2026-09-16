@@ -2,7 +2,6 @@ use crate::{BLOCK_SIZE_IN_SQUARES, CELL_SIZE_IN_BLOCKS, LotHeader, ZResult};
 use ndarray::prelude::*;
 use ndarray::{Ix, OwnedRepr};
 use std::path::PathBuf;
-use tracing::instrument;
 
 const BLOCK_SIZE: usize = 8;
 const SQRT_BLOCK_SIZE: usize = 8 * 8;
@@ -15,14 +14,13 @@ pub struct LotPack {
 }
 
 impl LotPack {
-    #[instrument(skip(self), ret, fields(idx, idx_mod, yidx, yidx_mod, block))]
-    pub fn get_block(&self, bx: usize, by: usize, layer: i32) -> Option<&[i32]> {
+    pub fn get_block(&self, bx: usize, by: usize, layer: i32) -> &[i32] {
         let idx = bx / BLOCK_SIZE_IN_SQUARES;
         let idx_mod = bx % BLOCK_SIZE_IN_SQUARES;
         let yidx = by / BLOCK_SIZE_IN_SQUARES;
         let yidx_mod = by % BLOCK_SIZE_IN_SQUARES;
         let b = idx * CELL_SIZE_IN_BLOCKS + yidx;
-        Some(self.blocks[[b, (layer + self.header.min_layer.abs()) as usize, idx_mod, yidx_mod]].as_slice())
+        unsafe { self.blocks.uget([b, (layer + self.header.min_layer.abs()) as usize, idx_mod, yidx_mod]) }.as_slice()
     }
 }
 
@@ -109,7 +107,7 @@ impl LotPackReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::header::{LotHeaderReader};
+    use crate::header::LotHeaderReader;
     use tokio::time::Instant;
 
     #[tokio::test]
