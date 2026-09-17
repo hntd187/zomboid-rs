@@ -1,9 +1,9 @@
 use crate::ZResult;
 use dashmap::DashMap;
-use dashmap::mapref::one::Ref;
 use image::{RgbaImage, imageops};
 use std::io::{Error, ErrorKind};
 use std::path::Path;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct Sprite {
@@ -69,7 +69,7 @@ struct TexMeta {
 /// Name -> sprite. Load one or more `.pack` files into it.
 #[derive(Default)]
 pub struct TextureLibrary {
-    sprites: DashMap<String, Sprite>,
+    sprites: DashMap<String, Arc<Sprite>>,
 }
 
 impl TextureLibrary {
@@ -77,11 +77,12 @@ impl TextureLibrary {
         Self::default()
     }
 
-    pub fn get(&self, name: &str) -> Option<Ref<'_, String, Sprite>> {
-        self.sprites.get(name)
+    /// Cheap: clones the `Arc`, not the sprite pixels.
+    pub fn get(&self, name: &str) -> Option<Arc<Sprite>> {
+        self.sprites.get(name).map(|r| r.value().clone())
     }
 
-    pub fn insert(&self, name: &str, sprite: Sprite) {
+    pub fn insert(&self, name: &str, sprite: Arc<Sprite>) {
         self.sprites.insert(name.to_string(), sprite);
     }
 
@@ -159,7 +160,7 @@ impl TextureLibrary {
                     ox: m.ox - (m.ow >> 1),
                     oy: m.oy - m.oh,
                 };
-                self.sprites.insert(m.name, sprite);
+                self.sprites.insert(m.name, Arc::new(sprite));
             }
         }
         Ok(())
@@ -171,7 +172,7 @@ impl TextureLibrary {
 /// `blend_textures`: size a canvas to the combined affected area, draw each
 /// cell at anchor + its offset, then anchor the result at bottom-center.
 pub fn blend_sprite(lib: &TextureLibrary, names: &[&str]) -> Option<Sprite> {
-    let subs: Vec<Sprite> = names.iter().filter_map(|n| lib.get(n).map(|v| v.value().clone())).collect();
+    let subs: Vec<Arc<Sprite>> = names.iter().filter_map(|n| lib.get(n)).collect();
     if subs.is_empty() {
         return None;
     }

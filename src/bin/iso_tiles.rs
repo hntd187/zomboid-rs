@@ -17,7 +17,14 @@ pub async fn main() -> ZResult<()> {
 
     let (cx, cy) = project(N / 2, N / 2, 0);
     dbg!(cx, cy);
-    let (img, missing) = render_iso_viewport(&pack, &mut lib, cx - 512, cy - 512, 1024, 1024)?;
+
+    // Center tile + one ring of surrounding tiles: a 3x3 grid of 1024px tiles.
+    // Center tile's top-left is (cx - TILE/2, cy - TILE/2); back off one more
+    // tile on each axis and triple the extent.
+    const TILE: i32 = 1024;
+    let cam_x = cx - TILE / 2 - TILE;
+    let cam_y = cy - TILE / 2 - TILE;
+    let (img, missing) = render_iso_viewport(&pack, &mut lib, cam_x, cam_y, (3 * TILE) as u32, (3 * TILE) as u32)?;
     img.save("iso_tile.png")?;
 
     for (name, c) in missing.iter().take(40) {
