@@ -16,10 +16,6 @@ path = "src/bin/stitched_tiles.rs"
 name = "stitched-tiles"
 
 [[bin]]
-path = "src/bin/stitched_window.rs"
-name = "stitched-window"
-
-[[bin]]
 path = "src/bin/iso_tiles.rs"
 name = "iso-tiles"
 
@@ -41,14 +37,10 @@ memchr = "2"
 tracing = { version = "0.1" }
 heapless = "0.9"
 ndarray = "0.17"
-nalgebra = "0.35"
 wide = "1.7"
 fnv = "1"
 clap = { version = "4", features = ["derive"] }
-winit = "0.30"
 bytemuck = "1"
-wgpu = "30.0.1"
-pollster = "1.0.1"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports", "async_tokio", "async"] }

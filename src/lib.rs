@@ -15,7 +15,6 @@ const BLOCK_SIZE_IN_SQUARES: usize = 8;
 
 pub mod cell;
 pub mod foliage;
-pub mod gpu;
 pub mod handout;
 pub mod header;
 pub mod iso_render;

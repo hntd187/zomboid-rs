@@ -113,13 +113,12 @@ impl TextureLibrary {
             0
         } else {
             r.pos += 4;
-            let v = r.u32()?;
-            v
+            r.u32()?
         };
 
         let page_num = r.u32()?;
 
-        for i in 0..page_num {
+        for _ in 0..page_num {
             let _page_name = r.bytes_with_len()?;
             let count = r.u32()?;
             let _has_alpha = r.u32()?;
@@ -139,22 +138,14 @@ impl TextureLibrary {
                     oh: r.i32()?,
                 });
             }
-            // println!("Pushed {count} texture metas");
-
-            // Page PNG: v1 is length-prefixed; v0 runs until the 0xDEADBEEF magic.
             let png = match version {
                 1 => r.bytes_with_len()?,
                 0 => r.until(&[0xEF, 0xBE, 0xAD, 0xDE])?,
                 v => return Err(Error::new(ErrorKind::InvalidData, format!("unsupported pack version {v}")).into()),
             };
-            // println!("loading png with len: {:?}", png.len());
             let page = image::load_from_memory(png)?.to_rgba8();
-            // println!("Image loaded.");
-            // println!("Loading {} texture sprites", metas.len());
             for m in metas {
-                // Crop the (trimmed) sprite rect out of the atlas page.
                 let im = imageops::crop_imm(&page, m.x as u32, m.y as u32, m.w as u32, m.h as u32).to_image();
-                // Offset relative to the square's bottom-center (pzmap2dzi math).
                 let sprite = Sprite {
                     im,
                     ox: m.ox - (m.ow >> 1),
@@ -167,10 +158,6 @@ impl TextureLibrary {
     }
 }
 
-/// Composite a multi-cell sprite (e.g. a tree) from named sub-sprites in the
-/// library, using each sub-sprite's own offset. Mirrors pzmap2dzi's
-/// `blend_textures`: size a canvas to the combined affected area, draw each
-/// cell at anchor + its offset, then anchor the result at bottom-center.
 pub fn blend_sprite(lib: &TextureLibrary, names: &[&str]) -> Option<Sprite> {
     let subs: Vec<Arc<Sprite>> = names.iter().filter_map(|n| lib.get(n)).collect();
     if subs.is_empty() {
