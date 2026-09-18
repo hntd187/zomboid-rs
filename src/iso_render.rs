@@ -9,12 +9,16 @@ use crate::pack::{Sprite, TextureLibrary, blend_sprite};
 use crate::{TEXTURE_PATH, ZResult};
 
 const TILE_W: i32 = 128; // SQUARE_WIDTH
-const HALF_TILE_W: i32 = 64;
+pub const HALF_TILE_W: i32 = 64;
 const TILE_H: i32 = 64; // SQUARE_HEIGHT
-const HALF_TILE_H: i32 = 32;
-const Z_HEIGHT: i32 = 192; // LAYER_HEIGHT (vertical lift per z-level)
+pub const HALF_TILE_H: i32 = 32;
+pub const Z_HEIGHT: i32 = 192; // LAYER_HEIGHT (vertical lift per z-level)
 
 pub const N: i32 = 256;
+
+/// Squares along one edge of a cell (== `N`). A cell therefore covers global
+/// squares `[cx*CELL_SQUARES, cx*CELL_SQUARES + CELL_SQUARES)` on each axis.
+pub const CELL_SQUARES: i32 = 256;
 
 const MAX_SPRITE_W: i32 = 1024;
 const MAX_SPRITE_H: i32 = 1024;
@@ -89,6 +93,88 @@ pub fn render_iso_viewport(pack: &LotPack, lib: &TextureLibrary, cam_x: i32, cam
     }
 
     Ok(img)
+}
+
+/// Composite one cell's `layer` into `img`, a `view_w`×`view_h` output tile
+/// whose top-left pixel maps to global iso coordinate `(cam_x, cam_y)`.
+///
+/// Unlike [`render_iso_viewport`], squares are addressed in *global* space:
+/// cell `(cell_x, cell_y)` owns squares `[cell_x*CELL_SQUARES, +CELL_SQUARES)`.
+/// Because `project` is linear, the same painter's walk works for any cell — the
+/// caller draws every overlapping cell back-to-front (ascending `cell_x+cell_y`)
+/// and per layer so tall sprites overhang cell boundaries correctly.
+///
+/// `cache` is a per-cell tile-id → sprite memo; callers should clear/replace it
+/// between cells since tile ids are indices into that cell's own tile table.
+#[allow(clippy::too_many_arguments)]
+pub fn render_cell_layer_into(
+    img: &mut RgbaImage,
+    pack: &LotPack,
+    cell_x: u32,
+    cell_y: u32,
+    lib: &TextureLibrary,
+    cam_x: i32,
+    cam_y: i32,
+    view_w: u32,
+    view_h: u32,
+    layer: i32,
+    cache: &mut HashMap<i32, Option<Arc<Sprite>>>,
+) {
+    if !pack.has_layer(layer) {
+        return;
+    }
+
+    let hw = HALF_TILE_W;
+    let hh = HALF_TILE_H;
+    let z = layer;
+
+    // Visible window in (sx-sy) [screen-x] and (sx+sy) [diagonal] space, padded
+    // by a full sprite so overhang from off-tile anchors is still drawn. The
+    // z-lift shifts which diagonal band is on screen for this layer.
+    let u_lo = (cam_x - MAX_SPRITE_W).div_euclid(hw);
+    let u_hi = (cam_x + view_w as i32 + MAX_SPRITE_W).div_euclid(hw);
+    let v_lo = (cam_y - MAX_SPRITE_H + z * Z_HEIGHT).div_euclid(hh);
+    let v_hi = (cam_y + view_h as i32 + MAX_SPRITE_H + z * Z_HEIGHT).div_euclid(hh);
+
+    let gx0 = cell_x as i32 * CELL_SQUARES;
+    let gy0 = cell_y as i32 * CELL_SQUARES;
+    let gx1 = gx0 + CELL_SQUARES - 1;
+    let gy1 = gy0 + CELL_SQUARES - 1;
+
+    let diag_lo = (gx0 + gy0).max(v_lo);
+    let diag_hi = (gx1 + gy1).min(v_hi);
+
+    for diag in diag_lo..=diag_hi {
+        // gx bounded by: the cell box, the diagonal (gy in-box), and screen-x.
+        let gx_from = gx0.max(diag - gy1).max((diag + u_lo).div_euclid(2));
+        let gx_to = gx1.min(diag - gy0).min((diag + u_hi).div_euclid(2));
+        for gx in gx_from..=gx_to {
+            let gy = diag - gx;
+            let lx = (gx - gx0) as usize;
+            let ly = (gy - gy0) as usize;
+
+            let stack = pack.get_block(lx, ly, layer);
+            if stack.is_empty() {
+                continue;
+            }
+
+            let (world_x, world_y) = project(gx, gy, layer);
+            let base_x = world_x - cam_x;
+            let base_y = world_y + hh - cam_y;
+
+            for &tid in stack {
+                let sprite = cache
+                    .entry(tid)
+                    .or_insert_with(|| pack.header.tiles.get(tid as usize).and_then(|name| resolve_sprite(lib, name)));
+                let Some(sprite) = sprite.as_ref() else {
+                    continue;
+                };
+                let dx = base_x + sprite.ox;
+                let dy = base_y + sprite.oy;
+                imageops::overlay(img, &sprite.im, dx as i64, dy as i64);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

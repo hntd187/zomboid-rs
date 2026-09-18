@@ -14,6 +14,7 @@ const CELL_SIZE_IN_BLOCKS: usize = 32;
 const BLOCK_SIZE_IN_SQUARES: usize = 8;
 
 pub mod cell;
+pub mod dzi;
 pub mod foliage;
 pub mod handout;
 pub mod header;
@@ -23,6 +24,7 @@ pub mod render_backend;
 pub mod rooms;
 pub mod textures;
 pub mod top_render;
+pub mod world;
 
 pub type ImageRef = Arc<ImageCell<Rgba<u8>, ImageBuffer<Rgba<u8>, Vec<u8>>>>;
 

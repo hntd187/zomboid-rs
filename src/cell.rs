@@ -14,6 +14,17 @@ pub struct LotPack {
 }
 
 impl LotPack {
+    /// `[min_layer, max_layer)` — the z-levels this cell actually stores. Layers
+    /// outside this range must not be passed to `get_block`.
+    pub fn layer_range(&self) -> (i32, i32) {
+        (self.header.min_layer, self.header.max_layer)
+    }
+
+    /// True if `layer` is a valid z-level for this cell.
+    pub fn has_layer(&self, layer: i32) -> bool {
+        layer >= self.header.min_layer && layer < self.header.max_layer
+    }
+
     pub fn get_block(&self, bx: usize, by: usize, layer: i32) -> &[i32] {
         let idx = bx / BLOCK_SIZE_IN_SQUARES;
         let idx_mod = bx % BLOCK_SIZE_IN_SQUARES;
@@ -49,11 +60,23 @@ impl LotPackReader {
         self.advance_offset(4);
         Ok(result)
     }
+    /// Read a lotpack from disk using async IO (requires a tokio runtime).
     pub async fn load_lotpack(&mut self, path: &PathBuf, lot_header: LotHeader) -> ZResult<LotPack> {
         let file_bytes = tokio::fs::read(path).await?;
+        self.parse(&file_bytes, lot_header)
+    }
+
+    /// Read a lotpack from disk using blocking IO. Safe to call from a plain
+    /// worker thread (rayon / `spawn_blocking`) with no tokio runtime present.
+    pub fn load_lotpack_sync(&mut self, path: &PathBuf, lot_header: LotHeader) -> ZResult<LotPack> {
+        let file_bytes = std::fs::read(path)?;
+        self.parse(&file_bytes, lot_header)
+    }
+
+    fn parse(&mut self, file_bytes: &[u8], lot_header: LotHeader) -> ZResult<LotPack> {
         assert_eq!(file_bytes[0..4], [b'L', b'O', b'T', b'P']);
-        let _version = self.read_u32(&file_bytes)?;
-        let block_num = self.read_u32(&file_bytes)?;
+        let _version = self.read_u32(file_bytes)?;
+        let block_num = self.read_u32(file_bytes)?;
         let resolved_layer_count = (lot_header.max_layer - lot_header.min_layer) as usize;
 
         let mut blocks = Array::from_elem((1024, resolved_layer_count, 8, 8), heapless::Vec::new());
@@ -61,7 +84,7 @@ impl LotPackReader {
         for i in 0..block_num {
             let mut skip = 0;
             self.offset = (12 + i * 8) as usize;
-            self.offset = self.read_u32(&file_bytes)? as usize;
+            self.offset = self.read_u32(file_bytes)? as usize;
 
             for z in 0..resolved_layer_count {
                 if skip >= SQRT_BLOCK_SIZE {
@@ -78,9 +101,9 @@ impl LotPackReader {
                             skip -= 1;
                             continue;
                         }
-                        let count = self.read_i32(&file_bytes)?;
+                        let count = self.read_i32(file_bytes)?;
                         if count == -1 {
-                            skip = self.read_i32(&file_bytes)? as usize;
+                            skip = self.read_i32(file_bytes)? as usize;
                             if skip > 0 {
                                 skip -= 1;
                                 continue;
@@ -89,10 +112,10 @@ impl LotPackReader {
                         if count <= 1 {
                             continue;
                         }
-                        let _room = self.read_i32(&file_bytes)?;
+                        let _room = self.read_i32(file_bytes)?;
                         for _ in 0..count - 1 {
                             blocks[[i as usize, z, x, y]]
-                                .push(self.read_i32(&file_bytes)?)
+                                .push(self.read_i32(file_bytes)?)
                                 .expect("Block out of range, this shouldn't happen");
                         }
                     }

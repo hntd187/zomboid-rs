@@ -19,6 +19,10 @@ name = "stitched-tiles"
 path = "src/bin/iso_tiles.rs"
 name = "iso-tiles"
 
+[[bin]]
+path = "src/bin/iso_map.rs"
+name = "iso-map"
+
 [[bench]]
 name = "color_sums"
 harness = false

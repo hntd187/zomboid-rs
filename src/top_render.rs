@@ -57,6 +57,18 @@ pub async fn read_lots(path_buf: PathBuf, x: usize, y: usize) -> ZResult<LotPack
     pak_reader.load_lotpack(&pack, lot_header).await
 }
 
+/// Blocking twin of [`read_lots`]. Loads one cell (`{x}_{y}.lotheader` +
+/// `world_{x}_{y}.lotpack`) using `std::fs`, so it can run on a rayon worker
+/// or any thread without a tokio runtime.
+pub fn read_lots_sync(path_buf: &std::path::Path, x: usize, y: usize) -> ZResult<LotPack> {
+    let header = path_buf.join(format!("{}_{}.lotheader", x, y));
+    let pack = path_buf.join(format!("world_{}_{}.lotpack", x, y));
+    let mut lot_reader = LotHeaderReader::new();
+    let mut pak_reader = LotPackReader::new();
+    let lot_header = lot_reader.load_lotheader_sync(&header)?;
+    pak_reader.load_lotpack_sync(&pack, lot_header)
+}
+
 pub fn render_cell(img: &mut CellColors, pack: LotPack, x_offset: usize, y_offset: usize, layer: i32) -> ZResult<()> {
     let pallet: Vec<_> = pack
         .header

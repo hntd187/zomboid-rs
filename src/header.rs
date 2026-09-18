@@ -36,7 +36,7 @@ impl LotHeaderReader {
     }
 
     #[inline]
-    async fn read_tiles(&mut self, data: &mut [u8], num_tiles: usize) -> ZResult<Vec<String>> {
+    fn read_tiles(&mut self, data: &mut [u8], num_tiles: usize) -> ZResult<Vec<String>> {
         let mut output = Vec::with_capacity(num_tiles);
         for _ in 0..num_tiles {
             if let Some(tile_name) = self.maybe_string(data) {
@@ -47,7 +47,7 @@ impl LotHeaderReader {
         }
         Ok(output)
     }
-    async fn read_rooms(&mut self, data: &mut [u8], room_number: usize) -> ZResult<Vec<Room>> {
+    fn read_rooms(&mut self, data: &mut [u8], room_number: usize) -> ZResult<Vec<Room>> {
         let mut rooms: Vec<Room> = vec![Room::default(); room_number];
         for id in 0..room_number {
             if let Some(name) = self.maybe_string(data) {
@@ -88,31 +88,43 @@ impl LotHeaderReader {
         Ok(rooms)
     }
 
+    /// Read a lotheader from disk using async IO (requires a tokio runtime).
     pub async fn load_lotheader(&mut self, file_path: &PathBuf) -> ZResult<LotHeader> {
         let mut file_bytes = tokio::fs::read(file_path).await?;
+        self.parse(&mut file_bytes)
+    }
+
+    /// Read a lotheader from disk using blocking IO. Safe to call from a plain
+    /// worker thread (rayon / `spawn_blocking`) with no tokio runtime present.
+    pub fn load_lotheader_sync(&mut self, file_path: &PathBuf) -> ZResult<LotHeader> {
+        let mut file_bytes = std::fs::read(file_path)?;
+        self.parse(&mut file_bytes)
+    }
+
+    fn parse(&mut self, file_bytes: &mut [u8]) -> ZResult<LotHeader> {
         let version = if file_bytes[0..4] == [b'L', b'O', b'T', b'H'] {
-            self.read_u32(&mut file_bytes)?
+            self.read_u32(&mut *file_bytes)?
         } else {
             u32::from_le_bytes(file_bytes[0..4].try_into()?)
         };
 
-        let num_tiles = self.read_u32(&mut file_bytes)?;
-        let tiles = self.read_tiles(&mut file_bytes, num_tiles as usize).await?;
+        let num_tiles = self.read_u32(&mut *file_bytes)?;
+        let tiles = self.read_tiles(&mut *file_bytes, num_tiles as usize)?;
 
-        let width = self.read_u32(&mut file_bytes)?;
-        let height = self.read_u32(&mut file_bytes)?;
-        let min_layer = self.read_i32(&mut file_bytes)?;
-        let max_layer = self.read_i32(&mut file_bytes)? + 1;
+        let width = self.read_u32(&mut *file_bytes)?;
+        let height = self.read_u32(&mut *file_bytes)?;
+        let min_layer = self.read_i32(&mut *file_bytes)?;
+        let max_layer = self.read_i32(&mut *file_bytes)? + 1;
 
-        let room_number = self.read_u32(&mut file_bytes)?;
-        let rooms = self.read_rooms(&mut file_bytes, room_number as usize).await?;
-        let building_num = self.read_u32(&mut file_bytes)?;
+        let room_number = self.read_u32(&mut *file_bytes)?;
+        let rooms = self.read_rooms(&mut *file_bytes, room_number as usize)?;
+        let building_num = self.read_u32(&mut *file_bytes)?;
         let mut buildings = vec![Building::default(); building_num as usize];
         for id in 0..building_num as usize {
-            let room_num = self.read_u32(&mut file_bytes)?;
+            let room_num = self.read_u32(&mut *file_bytes)?;
             let mut rooms = vec![0u32; room_num as usize];
             for rn in 0..room_num as usize {
-                rooms[rn] = self.read_u32(&mut file_bytes)?;
+                rooms[rn] = self.read_u32(&mut *file_bytes)?;
             }
             buildings[id].id = id as u32;
             buildings[id].rooms = rooms;
